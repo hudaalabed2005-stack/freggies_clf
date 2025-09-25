@@ -238,49 +238,69 @@ def export_csv():
 def _summarize(last: dict) -> dict:
     """
     Combine the latest vision prediction and gas ppm into a single, simple decision.
+
     - Vision only votes 'rotten' if label says spoiled/rotten AND confidence >= VISION_MIN_CONF.
     - Any high gas flag can mark the sample as spoiled.
     """
+
     # thresholds
     VISION_MIN_CONF = 60.0   # %
     CO2_HI  = 2000.0         # ppm
-    NH3_HI  = 15.0           # ppm
-    BENZ_HI = 5.0            # ppm
-    ALC_HI  = 10.0           # eq
+    NH3_HI  = 400.0          # ppm
+    BENZ_HI = 400.0          # ppm
+    ALC_HI  = 400.0          # eq 
 
     pred = last.get("vision") or {}
-    gas  = (last.get("gas") or {}).get("ppm", {}) or {}
+    gas_ppm = ((last.get("gas") or {}).get("ppm") or {})
 
-    co2   = gas.get("co2")
-    nh3   = gas.get("nh3")
-    benz  = gas.get("benzene")
-    alco  = gas.get("alcohol")
+    co2  = gas_ppm.get("co2")
+    nh3  = gas_ppm.get("nh3")
+    benz = gas_ppm.get("benzene")
+    alc  = gas_ppm.get("alcohol")
 
-    # gas flags
-    co2_hi = (co2 is not None)  and (co2  >= CO2_HI)
-    nh3_hi = (nh3 is not None)  and (nh3  >= NH3_HI)
-    voc_hi = ((benz or 0) >= BENZ_HI) or ((alco or 0) >= ALC_HI)
+    # Gas flags vs thresholds
+    co2_high  = (co2  is not None) and (co2  >= CO2_HI)
+    nh3_high  = (nh3  is not None) and (nh3  >= NH3_HI)
+    benz_high = (benz is not None) and (benz >= BENZ_HI)
+    alc_high  = (alc  is not None) and (alc  >= ALC_HI)
 
-    # vision vote (label + confidence)
-    label = str(pred.get("label") or "")
-    conf  = float(pred.get("confidence") or 0.0)
-    looks_rotten = ("spoiled" in label.lower() or "rotten" in label.lower()) and (conf >= VISION_MIN_CONF)
+    # Vision vote only counts spoiled if confidence is high enough
+    model_rotten = False
+    if isinstance(pred.get("label"), str):
+        lbl  = pred["label"].lower()
+        conf = float(pred.get("confidence") or 0.0)
+        if ("spoiled" in lbl or "rotten" in lbl) and conf >= VISION_MIN_CONF:
+            model_rotten = True
 
-    spoiled = bool(looks_rotten or co2_hi or nh3_hi or voc_hi)
+    spoiled = model_rotten or co2_high or nh3_high or benz_high or alc_high
 
     return {
         "vision": pred,
-        "gas_ppm": {"co2": co2, "nh3": nh3, "benzene": benz, "alcohol": alco},
-        "gas_flags": {"co2_high": co2_hi, "nh3_high": nh3_hi, "voc_high": voc_hi},
+        "gas_ppm": {
+            "co2": co2,
+            "nh3": nh3,
+            "benzene": benz,
+            "alcohol": alc
+        },
+        "gas_flags": {
+            "co2_high": co2_high,
+            "nh3_high": nh3_high,
+            "benzene_high": benz_high,
+            "alcohol_high": alc_high
+        },
         "decision": "SPOILED" if spoiled else "FRESH",
         "meta": {
-            "max_points": MAX_POINTS,
             "thresholds": {
-                "vision_min_conf": VISION_MIN_CONF,
-                "co2_hi": CO2_HI, "nh3_hi": NH3_HI, "benz_hi": BENZ_HI, "alcohol_hi": ALC_HI
-            }
+                "VISION_MIN_CONF": VISION_MIN_CONF,
+                "CO2_HI": CO2_HI,
+                "NH3_HI": NH3_HI,
+                "BENZ_HI": BENZ_HI,
+                "ALC_HI": ALC_HI
+            },
+            "max_points": MAX_POINTS
         }
     }
+
 
 
 @app.get("/summary")
